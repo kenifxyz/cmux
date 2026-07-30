@@ -14,8 +14,7 @@ def failures_for(workflow: str) -> list[str]:
     with tempfile.TemporaryDirectory() as directory:
         workflow_dir = Path(directory)
         (workflow_dir / "fixture.yml").write_text(
-            textwrap.dedent(workflow),
-            encoding="utf-8",
+            textwrap.dedent(workflow), encoding="utf-8",
         )
         return workflow_failures(workflow_dir)
 
@@ -93,8 +92,69 @@ def test_initialized_consumer_passes() -> None:
     assert failures == [], failures
 
 
+def test_setup_zig_ignores_non_run_mentions() -> None:
+    failures = failures_for(
+        """\
+        name: fixture
+        on: workflow_dispatch
+        jobs:
+          build:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v6
+                with:
+                  submodules: recursive
+              - name: Resolve Ghostty Zig version
+                id: ghostty-zig-version
+                run: |
+                  version="$(bash ./scripts/ghostty-zig-version.sh)"
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+              - uses: actions/github-script@v7
+                with:
+                  script: |
+                    const helper = 'scripts/ghostty-zig-version.sh';
+              - uses: mlugg/setup-zig@v2
+                with:
+                  version: ${{ steps.ghostty-zig-version.outputs.version }}
+        """
+    )
+
+    assert failures == [], failures
+
+
+def test_setup_zig_resolver_must_execute_helper() -> None:
+    failures = failures_for(
+        """\
+        name: fixture
+        on: workflow_dispatch
+        jobs:
+          build:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v6
+                with:
+                  submodules: recursive
+              - uses: actions/github-script@v7
+                id: ghostty-zig-version
+                with:
+                  script: |
+                    const helper = 'scripts/ghostty-zig-version.sh';
+              - uses: mlugg/setup-zig@v2
+                with:
+                  version: ${{ steps.ghostty-zig-version.outputs.version }}
+        """
+    )
+
+    assert any(
+        "resolver must execute scripts/ghostty-zig-version.sh exactly once" in failure
+        for failure in failures
+    ), failures
+
+
 if __name__ == "__main__":
     test_non_executing_mentions_do_not_require_ghostty()
     test_executing_consumer_before_init_fails()
     test_initialized_consumer_passes()
+    test_setup_zig_ignores_non_run_mentions()
+    test_setup_zig_resolver_must_execute_helper()
     print("all Ghostty Zig workflow guard tests passed")
